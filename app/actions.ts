@@ -14,16 +14,18 @@ export interface NoteEntry {
 
 function getUrl() {
   const url = process.env.NEXT_PUBLIC_API_URL;
-
   if (!url) {
     throw new Error('Cannot fetch notes: API is not configured');
   }
-
   return url;
 }
 
-async function performFetch(url: string, method: string, body?: string) {
-  await fetch(url, {
+async function fetchWithRevalidation(
+  url: string,
+  method: string,
+  body?: string,
+): Promise<Response> {
+  const res = await fetch(url, {
     method,
     headers: {
       'Content-Type': 'application/json',
@@ -31,70 +33,63 @@ async function performFetch(url: string, method: string, body?: string) {
     body,
   });
   revalidateTag('notes');
+  return res.json();
+}
+
+async function performAction<T>(fn: () => Promise<T>): Promise<T | undefined> {
+  try {
+    return await fn();
+  } catch (err) {
+    console.error('Error during operation:', err);
+    return undefined;
+  }
 }
 
 function parseFormToBody(formData: FormData) {
   const title = formData.get('title');
   const content = formData.get('content');
-  const important = formData.get('important') ? true : false;
+  const important = formData.has('important');
 
   return JSON.stringify({ title, content, important });
 }
 
 export async function listNotes() {
-  try {
+  return performAction(async () => {
     const url = getUrl();
     const res = await fetch(url, { next: { tags: ['notes'] } });
     if (!res.ok) {
-      console.log(res.status)
+      console.log(`Failed to fetch notes. Status: ${res.status}`);
       return [];
     }
     const notes = (await res.json()) as NoteEntry[];
     return notes;
-  } catch (err) {
-    console.error(err);
-    return;
-  }
+  });
 }
 
 export async function addNote(formData: FormData) {
-  try {
-    const url = getUrl();
-    const body = parseFormToBody(formData);
+  const url = getUrl();
+  const body = parseFormToBody(formData);
 
-    await performFetch(url, 'POST', body);
-  } catch (err) {
-    console.log(err);
-  }
+  await performAction(() => fetchWithRevalidation(url, 'POST', body));
 }
 
 export async function updateNote(id: string, formData: FormData) {
-  try {
-    const url = getUrl();
-    const body = parseFormToBody(formData);
+  const url = getUrl();
+  const body = parseFormToBody(formData);
 
-    await performFetch(`${url}/${id}`, 'PUT', body);
-  } catch (err) {
-    console.error(err);
-  }
+  await performAction(() => fetchWithRevalidation(`${url}/${id}`, 'PUT', body));
 }
 
 export async function updateImportant(id: string, important: boolean) {
-  try {
-    const url = getUrl();
+  const url = getUrl();
 
-    await performFetch(`${url}/${id}`, 'PUT', JSON.stringify({ important }));
-  } catch (err) {
-    console.error(err);
-  }
+  await performAction(() =>
+    fetchWithRevalidation(`${url}/${id}`, 'PUT', JSON.stringify({ important })),
+  );
 }
 
 export async function deleteNote(id: string) {
-  try {
-    const url = getUrl();
+  const url = getUrl();
 
-    await performFetch(`${url}/${id}`, 'DELETE');
-  } catch (err) {
-    console.error(err);
-  }
+  await performAction(() => fetchWithRevalidation(`${url}/${id}`, 'DELETE'));
 }
